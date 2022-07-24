@@ -328,12 +328,12 @@ class EventProvidersSQLite3DatabaseReader(SQLite3DatabaseReader):
     """Retrieves the Event Log providers.
 
     Yields:
-      EventLogProvider: event log provider.
+      EventLogProvider: Event Log provider.
     """
     table_names = ['event_log_providers']
     column_names = [
         'event_log_provider_key', 'identifier', 'additional_identifier',
-        'log_source1', 'log_source2', 'log_source3', 'log_type']
+        'name', 'log_source1', 'log_source2', 'log_source3', 'log_type']
     condition = ''
 
     for values in self._database_file.GetValues(
@@ -345,8 +345,12 @@ class EventProvidersSQLite3DatabaseReader(SQLite3DatabaseReader):
         event_log_provider.additional_identifier = values[
             'additional_identifier']
 
-      event_log_provider.log_types.append(values['log_type'])
-      event_log_provider.log_sources.append(values['log_source1'])
+      event_log_provider.name = values['name']
+
+      if values['log_type']:
+        event_log_provider.log_types.append(values['log_type'])
+      if values['log_source1']:
+        event_log_provider.log_sources.append(values['log_source1'])
       if values['log_source2']:
         event_log_provider.log_sources.append(values['log_source2'])
       if values['log_source3']:
@@ -386,11 +390,56 @@ class EventProvidersSQLite3DatabaseReader(SQLite3DatabaseReader):
 class EventProvidersSQLite3DatabaseWriter(SQLite3DatabaseWriter):
   """Event Log providers SQLite database writer."""
 
+  def _GetEventLogProviderCondition(self, event_log_provider):
+    """Retrieves the condition to find the Event Log provider.
+
+    Args:
+      event_log_provider (EventLogProvider): Event Log provider.
+
+    Returns:
+      str: condition.
+    """
+    condition = ''
+
+    log_sources = event_log_provider.log_sources + [None, None, None]
+    log_source1, log_source2, log_source3 = log_sources[:3]
+
+    if log_source1:
+      condition = (
+          'log_source1 = "{0:s}" OR log_source2 = "{0:s}" OR '
+          'log_source3 = "{0:s}"').format(log_source1)
+
+    if log_source2:
+      condition = (
+          '{0:s} OR log_source1 = "{1:s}" OR log_source2 = "{1:s}" OR '
+          'log_source3 = "{1:s}"').format(condition, log_source2)
+
+    if log_source3:
+      condition = (
+          '{0:s} OR log_source1 = "{1:s}" OR log_source2 = "{1:s}" OR '
+          'log_source3 = "{1:s}"').format(condition, log_source3)
+
+    if event_log_provider.identifier:
+      if condition:
+        condition = '{0:s} OR '.format(condition)
+
+      condition = (
+          '{0:s}identifier = "{1:s}" OR additional_identifier = '
+          '"{1:s}"').format(condition, event_log_provider.identifier)
+
+    if event_log_provider.additional_identifier:
+      condition = (
+          '{0:s} OR identifier = "{1:s}" OR additional_identifier = '
+          '"{1:s}"').format(
+              condition, event_log_provider.additional_identifier)
+
+    return condition
+
   def _GetEventLogProviderKey(self, event_log_provider):
     """Retrieves the key of an Event Log provider.
 
     Args:
-      event_log_provider (EventLogProvider): event log provider.
+      event_log_provider (EventLogProvider): Event Log provider.
 
     Returns:
       int: Event Log provider key or None if no such value.
@@ -399,11 +448,9 @@ class EventProvidersSQLite3DatabaseWriter(SQLite3DatabaseWriter):
       IOError: if more than one value is found in the database.
       OSError: if more than one value is found in the database.
     """
-    log_source1 = event_log_provider.log_sources[0]
-
     table_names = ['event_log_providers']
     column_names = ['event_log_provider_key']
-    condition = 'log_source1 = "{0:s}"'.format(log_source1)
+    condition = self._GetEventLogProviderCondition(event_log_provider)
     values_list = list(self._database_file.GetValues(
         table_names, column_names, condition))
 
@@ -417,7 +464,7 @@ class EventProvidersSQLite3DatabaseWriter(SQLite3DatabaseWriter):
 
     raise IOError(
         'More than one value found in database for log source: {0:s}.'.format(
-            log_source1))
+            event_log_provider.name or event_log_provider.log_source))
 
   def _GetMessageFileKey(self, message_filename):
     """Retrieves the key of a message file.
@@ -456,7 +503,7 @@ class EventProvidersSQLite3DatabaseWriter(SQLite3DatabaseWriter):
     """Writes the message files used by an Event Log provider.
 
     Args:
-      event_log_provider (EventLogProvider): event log provider.
+      event_log_provider (EventLogProvider): Event Log provider.
       message_filename (str): message filename.
       message_file_type (str): message file type.
     """
@@ -466,7 +513,7 @@ class EventProvidersSQLite3DatabaseWriter(SQLite3DatabaseWriter):
 
     event_log_provider_key = self._GetEventLogProviderKey(event_log_provider)
     if event_log_provider_key is None:
-      logging.warning('Missing event log provider key for: {0:s}'.format(
+      logging.warning('Missing Event Log provider key for: {0:s}'.format(
           event_log_provider.log_sources[0]))
 
     message_file_key = self._GetMessageFileKey(message_filename)
@@ -487,67 +534,48 @@ class EventProvidersSQLite3DatabaseWriter(SQLite3DatabaseWriter):
     """Writes the Event Log provider.
 
     Args:
-      event_log_provider (EventLogProvider): event log provider.
+      event_log_provider (EventLogProvider): Event Log provider.
     """
     table_name = 'event_log_providers'
     column_names = [
-        'identifier', 'additional_identifier', 'log_source1', 'log_source2',
-        'log_source3', 'log_type']
-
-    log_sources = event_log_provider.log_sources + [None, None]
-    log_source1, log_source2, log_source3 = log_sources[:3]
+        'identifier', 'additional_identifier', 'name', 'log_source1',
+        'log_source2', 'log_source3', 'log_type']
 
     insert_values = True
 
     if not self._database_file.HasTable(table_name):
       column_definitions = [
           'event_log_provider_key INTEGER PRIMARY KEY AUTOINCREMENT',
-          'identifier TEXT', 'additional_identifier TEXT', 'log_source1 TEXT',
-          'log_source2 TEXT', 'log_source3 TEXT', 'log_type TEXT']
+          'identifier TEXT', 'additional_identifier TEXT', 'name TEXT',
+          'log_source1 TEXT', 'log_source2 TEXT', 'log_source3 TEXT',
+          'log_type TEXT']
       self._database_file.CreateTable(table_name, column_definitions)
 
     else:
-      condition = (
-          'log_source1 = "{0:s}" OR log_source2 = "{0:s}" OR '
-          'log_source3 = "{0:s}"').format(log_source1)
-
-      if log_source2:
-        condition = (
-            '{0:s} OR log_source1 = "{1:s}" OR log_source2 = "{1:s}" OR '
-            'log_source3 = "{1:s}"').format(condition, log_source2)
-
-      if log_source3:
-        condition = (
-            '{0:s} OR log_source1 = "{1:s}" OR log_source2 = "{1:s}" OR '
-            'log_source3 = "{1:s}"').format(condition, log_source3)
-
-      if event_log_provider.identifier:
-        condition = (
-            '{0:s} OR identifier = "{1:s}" OR additional_identifier = '
-            '"{1:s}"').format(
-                condition, event_log_provider.identifier)
-
-      if event_log_provider.additional_identifier:
-        condition = (
-            '{0:s} OR identifier = "{1:s}" OR additional_identifier = '
-            '"{1:s}"').format(
-                condition, event_log_provider.additional_identifier)
+      condition = self._GetEventLogProviderCondition(event_log_provider)
+      if not condition:
+        logging.warning(
+            'Unable to create condition for Event Log provider: {0:s}.'.format(
+                event_log_provider.name or event_log_provider.log_source))
 
       values_list = list(self._database_file.GetValues(
           [table_name], column_names, condition))
 
       number_of_values = len(values_list)
       if number_of_values > 0:
-        # TODO: determine if event log provider should be updated.
+        # TODO: determine if Event Log provider should be updated.
         logging.warning('Event log provider: {0:s} already exists.'.format(
-            log_source1))
+            event_log_provider.name or event_log_provider.log_source))
         insert_values = False
 
     if insert_values:
+      log_sources = event_log_provider.log_sources + [None, None, None]
+      log_source1, log_source2, log_source3 = log_sources[:3]
+
       values = [
           event_log_provider.identifier,
-          event_log_provider.additional_identifier, log_source1, log_source2,
-          log_source3, event_log_provider.log_types[0]]
+          event_log_provider.additional_identifier, event_log_provider.name,
+          log_source1, log_source2, log_source3, event_log_provider.log_type]
       self._database_file.InsertValues(table_name, column_names, values)
 
   def WriteMessageFile(self, message_filename, database_filename):
@@ -868,9 +896,9 @@ class MessageResourceFileSQLite3DatabaseWriter(SQLite3DatabaseWriter):
       insert_values = number_of_values == 0
 
     if insert_values:
+      language = definitions.LANGUAGES.get(language_identifier, ['', ''])[0]
       values = [
-          '0x{0:08x}'.format(language_identifier), message_file_key,
-          definitions.LANGUAGES.get(language_identifier, ['', ''])[0]]
+          '0x{0:08x}'.format(language_identifier), message_file_key, language]
       self._database_file.InsertValues(table_name, column_names, values)
 
   def _WriteMessageTables(self):
@@ -1013,9 +1041,9 @@ class MessageResourceFileSQLite3DatabaseWriter(SQLite3DatabaseWriter):
       insert_values = number_of_values == 0
 
     if insert_values:
+      language = definitions.LANGUAGES.get(language_identifier, ['', ''])[0]
       values = [
-          '0x{0:08x}'.format(language_identifier), message_file_key,
-          definitions.LANGUAGES.get(language_identifier, ['', ''])[0]]
+          '0x{0:08x}'.format(language_identifier), message_file_key, language]
       self._database_file.InsertValues(table_name, column_names, values)
 
   def _WriteStringTables(self):
@@ -1327,7 +1355,7 @@ class ResourcesSQLite3DatabaseWriter(SQLite3DatabaseWriter):
     """Retrieves the key of an Event Log provider.
 
     Args:
-      event_log_provider (EventLogProvider): event log provider.
+      event_log_provider (EventLogProvider): Event Log provider.
 
     Returns:
       int: the Event Log provider key or None if no such value.
@@ -1593,7 +1621,7 @@ class ResourcesSQLite3DatabaseWriter(SQLite3DatabaseWriter):
     """Writes the Event Log provider.
 
     Args:
-      event_log_provider (EventLogProvider): event log provider.
+      event_log_provider (EventLogProvider): Event Log provider.
     """
     table_name = 'event_log_providers'
     column_names = ['log_source', 'provider_guid']
@@ -1607,7 +1635,11 @@ class ResourcesSQLite3DatabaseWriter(SQLite3DatabaseWriter):
       insert_values = True
 
     else:
-      condition = 'log_source = "{0:s}"'.format(event_log_provider.log_source)
+      if event_log_provider.log_source:
+        condition = 'log_source = "{0:s}"'.format(event_log_provider.log_source)
+      if event_log_provider.identifier:
+        condition = 'provider_guid = "{0:s}"'.format(
+            event_log_provider.identifier)
       values_list = list(self._database_file.GetValues(
           [table_name], column_names, condition))
 
@@ -1637,7 +1669,7 @@ class ResourcesSQLite3DatabaseWriter(SQLite3DatabaseWriter):
     """Writes the message files used by an Event Log provider.
 
     Args:
-      event_log_provider (EventLogProvider): event log provider.
+      event_log_provider (EventLogProvider): Event Log provider.
       message_filename (str): message filename.
       message_file_type (str): message file type.
     """
@@ -1647,7 +1679,7 @@ class ResourcesSQLite3DatabaseWriter(SQLite3DatabaseWriter):
 
     event_log_provider_key = self._GetEventLogProviderKey(event_log_provider)
     if event_log_provider_key is None:
-      logging.warning('Missing event log provider key for: {0:s}'.format(
+      logging.warning('Missing Event Log provider key for: {0:s}'.format(
           event_log_provider.log_source))
 
     message_file_key = self._GetMessageFileKeyByPath(message_filename)
